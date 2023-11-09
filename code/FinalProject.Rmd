@@ -1,0 +1,785 @@
+---
+title: "Measuring a Movie’s Success Beyond the Dollar: <br> Are The Highest Grossing Movies of All Times Actually…Good?"
+author: "Emma Malcolm, Na Nguyen"
+date: "2023-04-11"
+output:
+  bookdown::html_document2:
+    split_by: NONE
+    toc: yes
+    toc_depth: 3
+    toc_float:
+      toc_collapsed: true
+    number_sections: false
+    code_download: true
+editor_options: 
+  markdown: 
+    wrap: 72
+---
+
+<!--- Begin styling code. --->
+
+```{=html}
+<style type="text/css">
+/* Whole document: */
+body{
+  font-family: "Palatino Linotype", "Book Antiqua", Palatino, serif;
+  font-size: 12pt;
+}
+h1.title {
+  font-size: 38px;
+  text-align: center;
+}
+h4.author {
+  font-size: 18px;
+  text-align: center;
+}
+h4.date {
+  font-size: 18px;
+  text-align: center;
+}
+</style>
+```
+<!--- End styling code. --->
+
+```{r,echo=FALSE}
+knitr::opts_chunk$set(echo = TRUE, eval = TRUE, warning = FALSE, message = FALSE, tidy = TRUE)
+```
+
+```{r, echo=FALSE, message=FALSE}
+library(tidyverse)
+library(splitstackshape)
+library(dbplyr)
+library(stringr)
+library(readr)
+library(ggplot2)
+library(ggthemes)
+library(fivethirtyeight)
+library(highcharter)
+library(scales)
+library(rvest)
+library(scales)
+library(plotly)
+library(gapminder)
+library(forcats)
+library(magrittr)
+
+
+#Loading raw data
+box_office <-read_csv("../data/All Time Worldwide Box Office.csv")
+movies_info <- read_csv("../data/movies.csv")
+oscars_award <- read_csv("../data/the_oscar_award.csv")
+bechdel <- data.frame(bechdel)
+bechdelset <- read_csv("../data/bechdelset.csv")
+Bechdelmoney <- read_csv("../data/Bechdelmoney.csv")
+biopics <- data.frame(biopics)
+RatingGross <- read_csv("../data/RatingGross_edit2.csv")
+
+```
+
+```{r,echo=FALSE, message=FALSE}
+#Data cleaning for figure 1
+#average grossing for each top 20 scored
+
+top_score <- movies_info %>% 
+  select(name, score, year, gross) %>% 
+  arrange(desc(score))
+
+#average grossing for each top 20 scored
+
+low_score <- movies_info %>% 
+  select(name, score, year, gross) %>% 
+  arrange(score)
+
+
+oscarwins <-  movies_info %>% 
+  filter(name %in% c("The Lord of the Rings: The Return of the King", "Titanic", "Ben-Hur", "West Side Story", "The English Patient", "The Last Emperor", "Gigi", "Slumdog Millionaire", "Amadeus", "Gandhi")) %>% 
+ summarize(sum=sum(gross))
+
+
+doubledata <- movies_info %>%
+  left_join(RatingGross,
+    by = c("name", "year" = "Year"))
+
+
+topgross <- doubledata %>% 
+  filter(doubledata$Rank < 25) %>%  
+  arrange(desc(`WorldwideBox Office`)) %>% 
+  select(name, score.x, Rank, `WorldwideBox Office`)
+
+duplicate_rows <- topgross[duplicated(topgross), ]
+topgross <- unique(topgross)
+
+
+toprate <- doubledata %>% 
+  select(name, score.x, Rank, `WorldwideBox Office`) %>% 
+  arrange(desc(score.x)) 
+
+     
+topgross_20 <- head(topgross, n = 20) %>% 
+  select(name, score.x, `WorldwideBox Office`)
+topscore_20 <- head(toprate, n = 20) %>% 
+  select(name, score.x, `WorldwideBox Office`)
+
+
+
+```
+
+```{r,echo=FALSE, message=FALSE}
+#Data cleaning for figure 2
+# Changing Box Office variables into numerical values
+box_office <-box_office %>% 
+ mutate(`WorldwideBox Office`=as.numeric(str_replace_all(`WorldwideBox Office`,"[$,]",""))) %>% 
+  mutate(`DomesticBox Office`=as.numeric(str_replace_all(`DomesticBox Office`,"[$,]",""))) %>%
+  mutate(`InternationalBox Office`=as.numeric(str_replace_all(`InternationalBox Office`,"[$,]","")))
+
+#Getting the Top 20 Box Office
+box_office_top20 <- box_office %>%  
+  arrange(Rank) %>% 
+  head(20) %>% 
+  mutate(Movie=ifelse(Movie=="Harry Potter and the Deathly Hallows:…", "Harry Potter and the Deathly Hallows: Part 2",Movie))
+
+
+#Creating Oscar category data frame
+oscars_category <- tibble(
+levels(factor(oscars_award$category)))
+  
+
+oscars_category <- oscars_category %>% 
+  rename("category"="levels(factor(oscars_award$category))") 
+  
+
+oscars_category <- oscars_category %>% 
+  mutate(broad_category=word(category,1)) %>% 
+  mutate(broad_category=
+           case_when(broad_category =="ART" ~"ART DIRECTION",
+                     broad_category == "BEST" ~ "BEST PICTURE",
+                     broad_category == "FILM" ~ "FILM EDITING",
+                     broad_category == "ACTOR" | broad_category=="ACTRESS" ~ "ACTING",
+                    TRUE ~ broad_category)
+            ) 
+
+#Top 20 Box Office Movies and awards dataset by joining dataframes
+box_office_top20_awards <- box_office_top20 %>% 
+  inner_join(oscars_award,by=c("Movie"="film")) %>% 
+  filter(Year == year_film) %>% 
+  inner_join(oscars_category)  
+
+box_office_top20_awards <- box_office_top20_awards %>% group_by(Movie,year_film) %>% 
+  summarize(total=n()) %>%  inner_join(oscars_award,by=c("Movie"="film")) %>% 
+  filter(year_film.x == year_film.y) %>% 
+  inner_join(oscars_category)  %>% 
+  select(Movie, year_film.x,total,year_ceremony,name,winner,broad_category)
+```
+
+```{r,echo=FALSE, message=FALSE}
+#Data cleaning for figure 3
+#Changing movie names so they match across movies_info and box_office_top20
+
+movies_info <- movies_info %>%  mutate(name=case_when(
+  name=="Star Wars: Episode VII - The Force Awakens" ~ "Star Wars Ep. VII: The Force Awakens",
+  name =="Star Wars: Episode VIII - The Last Jedi" ~ "Star Wars Ep. VIII: The Last Jedi",
+TRUE~name)) %>% 
+  mutate(company=case_when(
+    company=="Walt Disney Animation Studios" | company=="Walt Disney Pictures" ~"Walt Disney",
+TRUE~company))
+
+#Joinining movies_info and box_office_top20
+
+box_office_top20_info<- box_office_top20 %>%
+  inner_join(movies_info,by=c("Movie"="name","Year"="year"))
+
+#Making top20 main character's race data frame
+top20_race <- data.frame(star=box_office_top20_info$star,Race=c("White","White","White","White","White","White","Black","White","White","White","White","Black","White","White","White","White","White","White","White","White"))
+
+#Joining box_office_top20_info with top20_race dataframe
+box_office_top20_info <- box_office_top20_info %>% data.frame(top20_race) %>% select(!star.1)
+
+```
+
+```{r,echo=FALSE, message=FALSE}
+#Data cleaning for figure 4
+
+bechdelset <- bechdelset %>% 
+  mutate(set_factor = factor(set)) 
+
+bechdelsetav <- bechdelset %>% 
+  group_by(set_factor, clean_test) %>% 
+  summarize(count = n ())
+
+bechdelsetav <- bechdelsetav %>% 
+  mutate(percent = count/ 20 * 100)
+
+bechdelav <- bechdel %>% 
+  group_by(clean_test) %>%  
+  summarize (count = n ())
+
+bechdelav <- bechdelav %>%  
+    mutate(percent = round(count/ 1794 * 100)) %>% 
+    mutate(set_factor = "Average Bechdel Scores")
+
+jointav <- rbind(bechdelsetav, bechdelav) 
+
+
+jointav$clean_test <- factor(jointav$clean_test, levels = c("nowomen", "notalk", "men", "dubious", "ok"))
+
+```
+
+```{r,echo=FALSE, message=FALSE,fig.alt="A scatter plot showing the relationship between the IMDb score and worldwide box office gross for movies with different Bechdel test scores. Each point represents a movie and is colored based on its Bechdel test score. The legend shows the five Bechdel test scores: no women, no talk, men, dubious, and ok. The x-axis represents the IMDb score, and the y-axis represents the worldwide box office gross in millions/ billions of dollars. The tooltip displays the movie name, IMDb score, and worldwide grossing for each point."}
+#Figure 1
+colors <- c("#AC2528", "#E4792C", "#764484", "#346491", "#448746")
+
+fig1<-plot_ly(bechdelset, x = ~score.x, y = ~`WorldwideBox Office`, color = ~clean_test, colors = colors, type = 'scatter', mode = 'markers',
+  hoverinfo = 'text',
+  text = ~paste('</br>', name, 
+                '</br>', "IMDB Score:", score.x, 
+                '</br>', "Worldwide Grossing:", comma(`WorldwideBox Office`))) %>% 
+  layout(title = 'IMDB Score vs. Amount of Money Grossed', 
+            xaxis = list(title = 'IMDB Score'), 
+            yaxis = list(title = 'Worldwide Box Office'), 
+           legend = list(title = list(text = "Bechdel Test Score"),
+                       titles = list(topgross_20 = "Top 20 Grossing", topscore_20 = "Top 20 Scored")))
+
+
+
+
+```
+
+```{r,fig.alt="This bar graph shows the total number of oscar awards nominations of the top 20 movies with the highest Worldwide Box Office by Category and Wins",echo=FALSE, message=FALSE,warning=FALSE}
+#Figure 2
+
+fig2<-box_office_top20_awards %>% 
+  ggplot(aes(x = fct_reorder(Movie, total,.fun=sum),alpha=winner,fill=fct_reorder(broad_category,winner))) + 
+  geom_bar()+
+  theme_classic() +
+  theme(legend.position = "right")+
+  scale_fill_viridis_d()+
+  coord_flip()+
+  labs(y="Total Nominations",x="Movie",title="Top 20 Movies with Highest Worldwide Box Office vs Oscars Awards",subtitle = "By Category and Wins",fill="Category",alpha="Winner")+
+  theme(plot.title = element_text(face="bold",size=16),plot.subtitle = element_text(size=14),axis.title.x = element_text(size=14),axis.text.x = element_text(size=12),axis.title.y = element_text(size=14),axis.text.y = element_text(size=12))
+
+
+```
+
+```{r,echo=FALSE, message=FALSE,fig.alt="This scatter plot displays the top 20 highest grossing movies of all time by their profit and the main character's race. It shows that out of 20 movies, 2 has a non-white main character."}
+#Figure 3
+fig3<-box_office_top20_info %>% 
+  mutate(Profit=gross-budget) %>%
+  ggplot(aes(x=budget,y=gross,color=Race,size=Profit)) +
+  geom_point()+
+  theme_minimal()+
+  scale_x_continuous(labels = label_comma())+
+  scale_y_continuous(labels = label_comma())+
+  scale_size_continuous(labels = label_comma())+
+  scale_color_viridis_d(option="E")+
+  labs(y="Total Gross",x="Budget",title="Top 20 Movies with Highest Worldwide Box Office",subtitle = "By Profit and Race of Main Character")+
+  theme(plot.title = element_text(face="bold",size=12),plot.subtitle = element_text(size=10),axis.text.x = element_text(size=8))+
+  annotate("text",x=200000000,y=1430000000,label="Black Panther",size=3,color="red3")+
+   annotate("text",x=260000000,y=1750000000,label="The Lion King (2019)",size=3,color="red3")
+
+  
+```
+
+```{r,echo=FALSE,message=FALSE,warning=FALSE,fig.alt="A stacked column chart showing the percentage distribution of movies that pass the Bechdel test by different movie sets. The x-axis represents the movie sets, and the y-axis represents the percentage of movies that pass the Bechdel test. The chart is divided into five categories based on the Bechdel test score: no women, no talk, men, dubious, and ok. The tooltip shows the percentage of movies for each category and movie set."}
+#Figure 4
+
+
+fig4<-hchart(jointav, "column", hcaes(x = set_factor, y = count, group = clean_test), stacking = "percent") %>% 
+  hc_title(text = "Bechdel Test Scores") %>% 
+  hc_colors(colors) %>% 
+  hc_tooltip(pointFormat = "{series.name}: {point.percentage:.1f}%") %>% 
+  hc_yAxis(title = "Percentage", labels = list(format = '{value}%')) %>%
+  hc_xAxis(title = NULL) %>% 
+  hc_colors(colors) %>% 
+  hc_legend(enabled = TRUE)
+```
+
+# The current anatomy of a good movie: Can we do better?
+
+Ever since the "Golden Age" of cinema in the 1930s that marked silent
+film a thing of the past, the film industry has witnessed unparalleled
+success and growth. From the first technicolor movies like The Wizard of
+Oz and Gone With The Wind to the computationally animated The Matrix,
+Jurassic Park, and the first fully computer-animated film, Toy Story,
+the industry of motion pictures has contributed greatly not only to
+technology but also the global economy. Especially in the current
+challenging economy and there has been a sharp decline in theater
+audience---[shrinking by half in the last 4
+years]<https://en.wikipedia.org/wiki/IMDb>), film distributors are
+hesitant to take on a movie unless they can see its success first hand.
+Therefore, box-office, or the entire earnings generated through movie
+ticket sales, has been recognized as one of the primary indicators to
+compare film success. Many rely on it to decide whether to both produce
+and watch a film. However, are high grossing movies actually... good? If
+so, what else can we use to measure them?
+
+One of the popular other indicators used worldwide to assess a movie is
+IMDb rating (or International Movie Database). IMDb rating allows [83
+million](https://en.wikipedia.org) of its registered users to cast a
+vote (from 1 to 10) on every released title in the database. These votes
+are then aggregated and summarized as a single IMDb rating visible on
+IMDb.com. Accessible to anyone, anywhere, these ratings are a simplified
+way to see what people all over the world think about movies and have
+been an often-used indicator for a film's popularity/quality. This led
+us to wonder: *How do the most profitable movies rank on the IMDb
+website?*
+
+```{r,echo=FALSE,message=FALSE,warning=FALSE,fig.alt="A scatter plot showing the relationship between the IMDb score and worldwide box office gross for movies with different Bechdel test scores. Each point represents a movie and is colored based on its Bechdel test score. The legend shows the five Bechdel test scores: no women, no talk, men, dubious, and ok. The x-axis represents the IMDb score, and the y-axis represents the worldwide box office gross in millions/ billions of dollars. The tooltip displays the movie name, IMDb score, and worldwide grossing for each point."}
+fig1
+```
+
+From our visualization above, the top 20 grossing films have a range of
+scores from 6.2 to 8.4 stars. Conversely, the top 20 scored movies on
+IMDb globally grossed between 28,419,159 and 1,120,210,896 U.S. Dollars.
+When comparing the IMDbscore and amount of money grossed, we can observe
+that there isn't much of a relationship between the rating of a film (or
+how "objectively good" a movie is) and the amount of money it makes.
+
+On the other hand, to investigate opinions of films from professionals
+and trusted members of the film industry, we can turn to the Academy
+Awards.
+
+```{r,fig.width=10,echo=FALSE,message=FALSE,warning=FALSE,fig.alt="This scatter plot displays the top 20 highest grossing movies of all time by their profit and the main character's race. It shows that out of 20 movies, 2 has a non-white main character."}
+fig2
+```
+
+It seems like a movie's revenue is not a strong indicator for its
+accolades. Among the top 20 movies with the highest worldwide box office
+and their Oscars awards, only 11 movies had any nominations at all.
+Furthermore, this list gets even more narrowed down as we look into
+wins/loses. Titanic, Avatar, Black Panther, and Frozen are the only
+movies in the top 20 highest worldwide grossing movies to have had at
+least one nomination and won, with Titanic as the most prolific with 11
+out of 14 categories (after grouping some of them together).
+
+The Oscars, however, are not an objective means of awardship. In 2015,
+the academy "awarded all 20 acting nominations to white actors for the
+first of two consecutive years, inspiring April Reign to create the
+hashtag #OscarsSoWhite" [(Ugwu,
+2020)](https://www.nytimes.com/2020/02/06/movies/oscarssowhite-history.html).
+Leaving the determination of film success to the Academy seems to yield
+a celebration of white creators and artists, excluding a whole world of
+diverse cinema.
+
+```{r,echo=FALSE,message=FALSE,warning=FALSE,fig.alt="This scatter plot displays the top 20 highest grossing movies of all time by their profit and the main character's race. It shows that out of 20 movies, 2 has a non-white main character."}
+fig3
+```
+
+As of 2020, [almost half of the U.S. population (42.2%) are people of
+color](https://en.wikipedia.org/wiki/Race_and_ethnicity_in_the_United_States#:~:text=As%20of%202020%2C%20White%20Americans,minority%2C%20making%20up%2012.1%25).
+Yet, Hollywood fails to consider them when making movies. In the top 20
+highest grossing movies of all time, only 2 movies featured a non-white
+main character---both of which were Black males. None of these movies
+are in the top 5 of this list in terms of profit and grossing while
+other underrepresented demographics (Latines, East/South/Southeast
+Asians, Native Americans, Afro Latinos, etc.) are left completely off
+the screen.
+
+Furthermore, in the history of the Oscars only three women have won the
+coveted best director title. This reflects a gendered measure of success
+within the film industry, where most of the praise goes to films about
+and created by cis men. To measure the representation of women in films,
+we can turn to the [Bechdel test](https://bechdeltest.com/) which was
+popularized by Alison Bechdel. The test names three simple criteria: (1)
+it has to have at least two women in it, who (2) who talk to each other,
+about (3) something besides a man. Although this test seems easy enough,
+only 25% of the top scored films and 50% of the top grossing films
+passed. Interestingly enough, when comparing the two datasets to an
+average Bechdel test score breakdown, we can see that the highest
+grossing films all have women and an above average score of "ok" and
+"dubious". However, the highest scored films have less than average "ok"
+and dubious" scores.
+
+```{r,echo=FALSE,message=FALSE,warning=FALSE,fig.alt="A stacked column chart showing the percentage distribution of movies that pass the Bechdel test by different movie sets. The x-axis represents the movie sets, and the y-axis represents the percentage of movies that pass the Bechdel test. The chart is divided into five categories based on the Bechdel test score: no women, no talk, men, dubious, and ok. The tooltip shows the percentage of movies for each category and movie set."}
+fig4
+```
+
+The trend we have identified here is strong: movies that make the most
+money are most often than not white-, male-, and Euro-centric. Even
+looking beyond the dollar, we can see how scoring systems and awards are
+biased towards this demographic as well. Although the American movie
+industry continues achieved commercial success, it historically has, and
+continues to, lack sufficient representation. While Hollywood has
+undoubtedly created notable films like The Wizard of Oz, Gone With The
+Wind, The Matrix, and Jurassic Park, the industry's focus on white males
+has resulted in a significant loss of diverse perspectives and cinematic
+experiences. It seems like when we are trying to judge a movie, we
+should have a broader repertoire of measurements for how *good* it is
+other than just money.
+
+# Data Description
+
+All of our datasets was scraped from public domains such as
+[kaggle.com](https://kaggle.com/) and
+[fivethirtyeight](https://fivethirtyeight.com/). In total, we used 4
+datasets to support our research paper: <br>
+
+1.  The Oscar Award, [1927 -
+    2023](https://www.kaggle.com/datasets/unanimad/the-oscar-award):
+
+-   10,765 Oscar nominations
+-   scraped from the Official Academy Awards
+-   7 variables: year, name, film, categories, win,... <br>
+
+2.  Movie Industry: Four decades of movies,
+    [1986-2016](https://www.kaggle.com/datasets/danielgrijalvas/movies):
+
+-   6820 movies in the dataset (around 220 movies per year)
+-   15 variables: budget, company, country, director, genre, name,....
+    <br>
+
+3.  All Time Worldwide Box Office,
+    [1939-2021](https://www.kaggle.com/datasets/kkhandekar/all-time-worldwide-box-office)
+
+-   contains the top movies based on the cumulative worldwide box office
+-   7512 movies and 6 variables: rank, worldwide-international-domestic
+    box office,... <br>
+
+4.  Bechdel Test, 1970-2013 (from library(fivethirtyeight))
+
+-   tests whether movies meet the following criteria: There are ≥ 2
+    (named) female characters;these women talk to each othe; about
+    something other than a man.
+-   1794 movies, 15 variables: movie, result, grossings, ...
+
+# Limitations
+
+## Data
+
+There are some limitations in the datasets. Firstmost, when comparing
+the worldwide grossing amount of movies, we were unable to account for
+inflation. The dataset "All Time Worldwide Box Office" scraped the the
+amounts of international grossing from 1939 to 2021, but IMDb states
+that ["all figures are not adjusted for
+inflation"](https://help.imdb.com/article/contribution/titles/business-imdbpro-only/GEJUWSBB6WXH3RZ6#).
+<br> According to a Minnesotan inflation calculator [1 U.S. Dollar in
+1939 is worth \$19.48
+today](https://www.minneapolisfed.org/about-us/monetary-policy/inflation-calculator),
+which means that the amount of money occurring in different time periods
+is not scaled to size. Additionally, in the dataset used for the racial
+distribution of Oscars winners, the dataset only contained the racial
+identities of best directors, actors, and actresses. This excludes 21
+other award categories, which could have given more accurate insight
+into the demographics of Oscars winners across the entire award
+ceremony.\
+<br> Furthermore, we used IMDb ratings to investigate how movies of
+various grossing amounts are scored, but it is worth noting that the
+website calculates an overall score from registered users casting their
+votes. However, there has been a larger discussion around the
+methodology of this system of movie-rating, with some people deeming
+online movie voting systems to be ineffective. Additionally, it was
+found that "most IMDb voters are male, which seems to skew the ranking
+in favour of films that are aimed more towards men" [(Reynolds,
+2017)](https://www.wired.co.uk/article/which-film-ranking-site-should-i-trust-rotten-tomatoes-imdb-metacritic).
+It is worth acknowledging that IMDb ratings are a biased system of
+ranking a film, however, this further aids our research question in
+illustrating the complications that come with determining whether a
+movie is "good". <br> Another limitation of this project is using The
+Bechdel test as a measure of gender equality in film. The Bechdel test
+is an infamous measure of Hollywood's gender imbalance, however it is an
+oversimplified means of analyzing the role of women in film. It asks
+three questions of a movie, and while astonishingly many films do not
+pass that bar, the simplicity of this test "doesn't address the core
+inequalities in Hollywood films" [(Hickey et al,
+2017)](https://projects.fivethirtyeight.com/next-bechdel/). In the
+dataset we used, there were many instances of "dubious" where the role
+of women in the film were debated, and therefore, the pass/fail score
+couldn't be determined. To create a more holistic analysis of gender
+equality in Hollywood in the future, it is worth researching new tests
+that include non-binary people, and expand the requirements. For ideas,
+we can turn to "We pitted 50 movies against 12 new ways of measuring
+Hollywood's gender imbalance" which suggests new tests that look beyond
+white women, and the cast and crew of the film.
+
+## Visualizations/ Overall Research
+
+Our attempt throughout this research is to suggest different metrics to
+compare and conclude a movie quality and public performance other than
+its revenue and profit returns. Despite the various indicators we have
+included to offer other avenues in determining a good movie, our "tests"
+are simply not enough. With the limited scope of available and "perfect"
+data, our research face real world limitations that fail to ascertain
+the severity and array of Hollywood's inequalities that are beyond the
+white male population. It also leaves out the population that stands
+behind the camera in movie production such as screenwriters, producers,
+set designers, etc. All of these are, hence, reflected in our
+visualizations. However, we hope that our research can serve as an
+incentive for the film industry as well as its audience to be more
+critical of movies and movie making.
+
+# Code Appendix
+
+```{r, eval=FALSE, message=FALSE}
+library(tidyverse)
+library(splitstackshape)
+library(dbplyr)
+library(stringr)
+library(readr)
+library(ggplot2)
+library(ggthemes)
+library(fivethirtyeight)
+library(highcharter)
+library(scales)
+library(rvest)
+library(scales)
+library(plotly)
+library(gapminder)
+library(forcats)
+library(magrittr)
+
+
+#Loading raw data
+box_office <-read_csv("All Time Worldwide Box Office.csv")
+movies_info <- read_csv("movies.csv")
+oscars_award <- read_csv("the_oscar_award.csv")
+bechdel <- data.frame(bechdel)
+bechdelset <- read_csv("bechdelset.csv")
+Bechdelmoney <- read_csv("Bechdelmoney.csv")
+biopics <- data.frame(biopics)
+RatingGross <- read_csv("RatingGross_edit2.csv")
+
+```
+
+```{r,eval=FALSE, message=FALSE}
+#Data cleaning for figure 1
+#average grossing for each top 20 scored
+
+top_score <- movies_info %>% 
+  select(name, score, year, gross) %>% 
+  arrange(desc(score))
+
+#average grossing for each top 20 scored
+
+low_score <- movies_info %>% 
+  select(name, score, year, gross) %>% 
+  arrange(score)
+
+
+
+oscarwins <-  movies_info %>% 
+  filter(name %in% c("The Lord of the Rings: The Return of the King", "Titanic", "Ben-Hur", "West Side Story", "The English Patient", "The Last Emperor", "Gigi", "Slumdog Millionaire", "Amadeus", "Gandhi")) %>% 
+ summarize(sum=sum(gross))
+
+movies_info %>%
+  group_by(year) %>%
+  summarize(total_movies = n(),
+            american_movies = sum(country == "United States"),
+            percent_american = 100 * american_movies / total_movies)
+
+
+doubledata <- movies_info %>%
+  left_join(RatingGross,
+    by = c("name", "year" = "Year"))
+
+
+topgross <- doubledata %>% 
+  filter(doubledata$Rank < 25) %>%  
+  arrange(desc(`WorldwideBox Office`)) %>% 
+  select(name, score.x, Rank, `WorldwideBox Office`)
+
+duplicate_rows <- topgross[duplicated(topgross), ]
+topgross <- unique(topgross)
+
+
+toprate <- doubledata %>% 
+  select(name, score.x, Rank, `WorldwideBox Office`) %>% 
+  arrange(desc(score.x)) 
+
+     
+topgross_20 <- head(topgross, n = 20) %>% 
+  select(name, score.x, `WorldwideBox Office`)
+topscore_20 <- head(toprate, n = 20) %>% 
+  select(name, score.x, `WorldwideBox Office`)
+
+
+
+```
+
+```{r,eval=FALSE, message=FALSE}
+#Data cleaning for figure 2
+# Changing Box Office variables into numerical values
+box_office <-box_office %>% 
+ mutate(`WorldwideBox Office`=as.numeric(str_replace_all(`WorldwideBox Office`,"[$,]",""))) %>% 
+  mutate(`DomesticBox Office`=as.numeric(str_replace_all(`DomesticBox Office`,"[$,]",""))) %>%
+  mutate(`InternationalBox Office`=as.numeric(str_replace_all(`InternationalBox Office`,"[$,]","")))
+
+#Getting the Top 20 Box Office
+box_office_top20 <- box_office %>%  
+  arrange(Rank) %>% 
+  head(20) %>% 
+  mutate(Movie=ifelse(Movie=="Harry Potter and the Deathly Hallows:…", "Harry Potter and the Deathly Hallows: Part 2",Movie))
+
+
+#Creating Oscar category data frame
+oscars_category <- tibble(
+levels(factor(oscars_award$category)))
+  
+
+oscars_category <- oscars_category %>% 
+  rename("category"="levels(factor(oscars_award$category))") 
+  
+
+oscars_category <- oscars_category %>% 
+  mutate(broad_category=word(category,1)) %>% 
+  mutate(broad_category=
+           case_when(broad_category =="ART" ~"ART DIRECTION",
+                     broad_category == "BEST" ~ "BEST PICTURE",
+                     broad_category == "FILM" ~ "FILM EDITING",
+                     broad_category == "ACTOR" | broad_category=="ACTRESS" ~ "ACTING",
+                    TRUE ~ broad_category)
+            ) 
+
+#Top 20 Box Office Movies and awards dataset by joining dataframes
+box_office_top20_awards <- box_office_top20 %>% 
+  inner_join(oscars_award,by=c("Movie"="film")) %>% 
+  filter(Year == year_film) %>% 
+  inner_join(oscars_category)  
+
+box_office_top20_awards <- box_office_top20_awards %>% group_by(Movie,year_film) %>% 
+  summarize(total=n()) %>%  inner_join(oscars_award,by=c("Movie"="film")) %>% 
+  filter(year_film.x == year_film.y) %>% 
+  inner_join(oscars_category)  %>% 
+  select(Movie, year_film.x,total,year_ceremony,name,winner,broad_category)
+```
+
+```{r,eval=FALSE, message=FALSE}
+#Data cleaning for figure 3
+#Changing movie names so they match across movies_info and box_office_top20
+
+movies_info <- movies_info %>%  mutate(name=case_when(
+  name=="Star Wars: Episode VII - The Force Awakens" ~ "Star Wars Ep. VII: The Force Awakens",
+  name =="Star Wars: Episode VIII - The Last Jedi" ~ "Star Wars Ep. VIII: The Last Jedi",
+TRUE~name)) %>% 
+  mutate(company=case_when(
+    company=="Walt Disney Animation Studios" | company=="Walt Disney Pictures" ~"Walt Disney",
+TRUE~company))
+
+#Joinining movies_info and box_office_top20
+
+box_office_top20_info<- box_office_top20 %>%
+  inner_join(movies_info,by=c("Movie"="name","Year"="year"))
+
+#Making top20 main character's race data frame
+top20_race <- data.frame(star=box_office_top20_info$star,Race=c("White","White","White","White","White","White","Black","White","White","White","White","Black","White","White","White","White","White","White","White","White"))
+
+#Joining box_office_top20_info with top20_race dataframe
+box_office_top20_info <- box_office_top20_info %>% data.frame(top20_race) %>% select(!star.1)
+
+```
+
+```{r,eval=FALSE, message=FALSE}
+#Data cleaning for figure 4
+
+bechdelset <- bechdelset %>% 
+  mutate(set_factor = factor(set)) 
+
+bechdelsetav <- bechdelset %>% 
+  group_by(set_factor, clean_test) %>% 
+  summarize(count = n ())
+
+bechdelsetav <- bechdelsetav %>% 
+  mutate(percent = count/ 20 * 100)
+
+bechdelav <- bechdel %>% 
+  group_by(clean_test) %>%  
+  summarize (count = n ())
+
+bechdelav <- bechdelav %>%  
+    mutate(percent = round(count/ 1794 * 100)) %>% 
+    mutate(set_factor = "Average Bechdel Scores")
+
+jointav <- rbind(bechdelsetav, bechdelav) 
+
+
+jointav$clean_test <- factor(jointav$clean_test, levels = c("nowomen", "notalk", "men", "dubious", "ok"))
+
+```
+
+```{r,eval=FALSE, message=FALSE,fig.alt="A scatter plot showing the relationship between the IMDb score and worldwide box office gross for movies with different Bechdel test scores. Each point represents a movie and is colored based on its Bechdel test score. The legend shows the five Bechdel test scores: no women, no talk, men, dubious, and ok. The x-axis represents the IMDb score, and the y-axis represents the worldwide box office gross in millions/ billions of dollars. The tooltip displays the movie name, IMDb score, and worldwide grossing for each point."}
+#Figure 1
+colors <- c("#AC2528", "#E4792C", "#764484", "#346491", "#448746")
+
+fig1<-plot_ly(bechdelset, x = ~score.x, y = ~`WorldwideBox Office`, color = ~clean_test, colors = colors, type = 'scatter', mode = 'markers',
+  hoverinfo = 'text',
+  text = ~paste('</br>', name, 
+                '</br>', "IMDB Score:", score.x, 
+                '</br>', "Worldwide Grossing:", comma(`WorldwideBox Office`))) %>% 
+  layout(title = 'IMDB Score vs. Amount of Money Grossed', 
+            xaxis = list(title = 'IMDB Score'), 
+            yaxis = list(title = 'Worldwide Box Office'), 
+           legend = list(title = list(text = "Bechdel Test Score"),
+                       titles = list(topgross_20 = "Top 20 Grossing", topscore_20 = "Top 20 Scored")))
+
+
+
+
+```
+
+```{r,fig.width=10,fig.height=6,fig.alt="This bar graph shows the total number of oscar awards nominations of the top 20 movies with the highest Worldwide Box Office by Category and Wins",eval=FALSE, message=FALSE}
+#Figure 2
+
+fig2<-box_office_top20_awards %>% 
+  ggplot(aes(x = fct_reorder(Movie, total,.fun=sum),alpha=winner,fill=fct_reorder(broad_category,winner))) + 
+  geom_bar()+
+  theme_classic() +
+  theme(legend.position = "right")+
+  scale_fill_viridis_d()+
+  coord_flip()+
+  labs(y="Total Nominations",x="Movie",title="Top 20 Movies with Highest Worldwide Box Office vs Oscars Awards",subtitle = "By Category and Wins",fill="Category",alpha="Winner")+
+  theme(plot.title = element_text(face="bold",size=16),plot.subtitle = element_text(size=14),axis.title.x = element_text(size=14),axis.text.x = element_text(size=12),axis.title.y = element_text(size=14),axis.text.y = element_text(size=12))
+
+
+```
+
+```{r,fig.width=6,fig.height=4,fig.alt="This scatter plot displays the top 20 highest grossing movies of all time by their profit and the main character's race. It shows that out of 20 movies, 2 has a non-white main character.",eval=FALSE, message=FALSE}
+#Figure 3
+fig3<-box_office_top20_info %>% 
+  mutate(Profit=gross-budget) %>%
+  ggplot(aes(x=budget,y=gross,color=Race,size=Profit)) +
+  geom_point()+
+  theme_minimal()+
+  scale_x_continuous(labels = label_comma())+
+  scale_y_continuous(labels = label_comma())+
+  scale_size_continuous(labels = label_comma())+
+  scale_color_viridis_d(option="E")+
+  labs(y="Total Gross",x="Budget",title="Top 20 Movies with Highest Worldwide Box Office",subtitle = "By Profit and Race of Main Character")+
+  theme(plot.title = element_text(face="bold",size=12),plot.subtitle = element_text(size=10),axis.text.x = element_text(size=8))+
+  annotate("text",x=200000000,y=1430000000,label="Black Panther",size=3,color="red3")+
+   annotate("text",x=260000000,y=1750000000,label="The Lion King (2019)",size=3,color="red3")
+
+  
+```
+
+```{r,eval=FALSE, message=FALSE,fig.alt="A stacked column chart showing the percentage distribution of movies that pass the Bechdel test by different movie sets. The x-axis represents the movie sets, and the y-axis represents the percentage of movies that pass the Bechdel test. The chart is divided into five categories based on the Bechdel test score: no women, no talk, men, dubious, and ok. The tooltip shows the percentage of movies for each category and movie set."}
+#Figure 4
+
+
+fig4<-hchart(jointav, "column", hcaes(x = set_factor, y = count, group = clean_test), stacking = "percent") %>% 
+  hc_title(text = "Bechdel Test Scores") %>% 
+  hc_colors(colors) %>% 
+  hc_tooltip(pointFormat = "{series.name}: {point.percentage:.1f}%") %>% 
+  hc_yAxis(title = "Percentage", labels = list(format = '{value}%')) %>%
+  hc_xAxis(title = NULL) %>% 
+  hc_colors(colors) %>% 
+  hc_legend(enabled = TRUE)
+```
+
+# Other Sources
+
+Brueggemann, Tom. "Theater Audiences Shrank by Half in the Last 4 Years.
+Can Movies Get Them Back?" IMDb, 5 January 2023,
+<https://www.imdb.com/news/ni63899408>. Accessed 3 May 2023. <br>
+Hickey, Walt, et al. Creating The Next Bechdel Test \| FiveThirtyEight,
+21 December 2017, <https://projects.fivethirtyeight.com/next-bechdel/>.
+Accessed 3 May 2023. <br> "IMDb." Wikipedia,
+<https://en.wikipedia.org/wiki/IMDb>. Accessed 3 May 2023. <br>
+Reynolds, Matt. "You should ignore film ratings on IMDb and Rotten
+Tomatoes." Wired UK, 24 October 2017,
+<https://www.wired.co.uk/article/which-film-ranking-site-should-i-trust-rotten-tomatoes-imdb-metacritic>.
+Accessed 3 May 2023. <br> Ugwu, Reggie. "The Hashtag That Changed the
+Oscars: An Oral History (Published 2020)." The New York Times, 9
+September 2020,
+<https://www.nytimes.com/2020/02/06/movies/oscarssowhite-history.html>.
+Accessed 3 May 2023. <br> Watkins, Albert. "Race and ethnicity in the
+United States." Wikipedia,
+<https://en.wikipedia.org/wiki/Race_and_ethnicity_in_the_United_States>.
+Accessed 3 May 2023.
